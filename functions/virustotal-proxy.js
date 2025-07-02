@@ -1,8 +1,6 @@
-// functions/virustotal-proxy.js
-
 const fetch = require('node-fetch');
 const multipart = require('aws-lambda-multipart-parser');
-const FormData = require('form-data'); // <-- NUOVA LIBRERIA
+const FormData = require('form-data');
 
 exports.handler = async function(event) {
     const baseUrl = 'https://www.virustotal.com/api/v3';
@@ -11,7 +9,6 @@ exports.handler = async function(event) {
         const contentType = event.headers['content-type'] || event.headers['Content-Type'];
 
         if (contentType && contentType.startsWith('multipart/form-data')) {
-            // --- GESTIONE FILE CORRETTA ---
             const form = await multipart.parse(event);
             const file = form.files[0];
             const apiKey = form.apiKey;
@@ -21,16 +18,21 @@ exports.handler = async function(event) {
             }
 
             const uploadUrl = `${baseUrl}/files`;
-
+            
             const formData = new FormData();
-            // Usiamo il buffer del file direttamente, che è il modo corretto in Node.js
             formData.append('file', file.content, file.filename);
 
             const response = await fetch(uploadUrl, {
                 method: 'POST',
-                headers: { 'x-apikey': apiKey },
-                body: formData // Invia il form creato con la libreria form-data
+                // === LA MODIFICA CHIAVE È QUI ===
+                // Uniamo gli header necessari per il form con la nostra API key
+                headers: {
+                    ...formData.getHeaders(),
+                    'x-apikey': apiKey
+                },
+                body: formData
             });
+
             const data = await response.json();
             return { statusCode: response.status, body: JSON.stringify(data) };
 
