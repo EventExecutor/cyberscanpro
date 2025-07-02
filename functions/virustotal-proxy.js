@@ -1,36 +1,96 @@
-const multipart = require('aws-lambda-multipart-parser');
+// functions/virustotal-proxy.js
+
+const fetch = require('node-fetch');
+const FormData = require('form-data');
+const busboy = require('busboy');
+
+// Funzione helper per parsare il form con busboy, che è asincrono
+function parseMultipartForm(event) {
+    return new Promise((resolve) => {
+        const fields = {};
+        const files = {};
+
+        const bb = busboy({
+            headers: {
+                'content-type': event.headers['content-type'] || event.headers['Content-Type']
+            }
+        });
+
+        bb.on('file', (name, stream, info) => {
+            const { filename, encoding, mimeType } = info;
+            const chunks = [];
+            stream.on('data', (chunk) => {
+                chunks.push(chunk);
+            });
+            stream.on('end', () => {
+                files[name] = {
+                    filename,
+                    content: Buffer.concat(chunks),
+                    contentType: mimeType,
+                    encoding,
+                };
+            });
+        });
+
+        bb.on('field', (name, value) => {
+            fields[name] = value;
+        });
+
+        bb.on('close', () => {
+            resolve({ fields, files });
+        });
+
+        bb.end(Buffer.from(event.body, 'base64'));
+    });
+}
+
 
 exports.handler = async function(event) {
-    console.log("--- FUNZIONE DI DEBUG ATTIVATA ---");
-    console.log("HEADER RICEVUTI:", event.headers);
-    console.log("IL BODY È CODIFICATO IN BASE64:", event.isBase64Encoded);
+    const baseUrl = 'https://www.virustotal.com/api/v3';
 
     try {
-        const form = await multipart.parse(event);
-        console.log("RISULTATO DEL PARSING DEL FORM:", form);
+        const contentType = event.headers['content-type'] || event.headers['Content-Type'];
 
-        // Crea un report di quello che abbiamo trovato
-        const report = {
-            apiKeyTrovata: !!form.apiKey,
-            chiaveApi: form.apiKey || "Non trovata",
-            numeroFileTrovati: form.files ? form.files.length : 0,
-            datiCompletiDelForm: form
-        };
+        if (contentType && contentType.startsWith('multipart/form-data')) {
+            // --- GESTIONE FILE CON BUSBOY ---
+            const { fields, files } = await parseMultipartForm(event);
+            const apiKey = fields.apiKey;
+            const file = files.file;
+            
+            if (!apiKey || !file) {
+                 return { statusCode: 400, body: JSON.stringify({ error: 'Dati del form (file o API key) non ricevuti correttamente.' }) };
+            }
 
-        // Restituisci sempre successo per poter vedere il report nel browser
-        return {
-            statusCode: 200, 
-            body: JSON.stringify(report)
-        };
+            const uploadUrl = `${baseUrl}/files`;
+            
+            const serverFormData = new FormData();
+            serverFormData.append('file', file.content, file.filename);
 
+            const response = await fetch(uploadUrl, {
+                method: 'POST',
+                headers: {
+                    ...serverFormData.getHeaders(),
+                    'x-apikey': apiKey
+                },
+                body: serverFormData
+            });
+            const data = await response.json();
+            return { statusCode: response.status, body: JSON.stringify(data) };
+
+        } else {
+            // --- GESTIONE URL (invariata) ---
+            const { apiKey, endpoint, options } = JSON.parse(event.body);
+            if (!apiKey || !endpoint) {
+                return { statusCode: 400, body: JSON.stringify({ error: 'API key o endpoint mancanti' }) };
+            }
+            const url = `${baseUrl}/${endpoint}`;
+            const fetchOptions = { ...options, headers: { ...(options.headers || {}), 'x-apikey': apiKey } };
+            const response = await fetch(url, fetchOptions);
+            const data = await response.json();
+            return { statusCode: response.status, body: JSON.stringify(data) };
+        }
     } catch (error) {
-        console.error('CRASH DURANTE IL PARSING:', error);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({
-                error: 'La funzione è andata in crash durante il parsing del form.',
-                details: error.message
-            })
-        };
+        console.error('Crash nella funzione proxy:', error);
+        return { statusCode: 500, body: JSON.stringify({ error: 'Errore interno critico del server', details: error.message }) };
     }
 };
