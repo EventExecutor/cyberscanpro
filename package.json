@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "aws-lambda-multipart-parser": "^0.3.0",
     "node-fetch": "^2.7.0"
   }
 }
