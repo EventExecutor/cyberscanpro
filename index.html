@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberScan Pro - Scanner VirusTotal</title>
+    <link rel="icon" type="image/x-icon" href="logo/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="logo/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="logo/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="logo/apple-touch-icon.png">
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-shield-virus"></i>
+                <h1>CyberScan Pro</h1>
+            </div>
+            <div class="header-controls">
+                <div class="status-indicator">
+                    <span class="status-dot" id="apiStatus"></span>
+                    <span>API Status</span>
+                </div>
+                <button id="configApiBtn" class="config-btn">
+                    <i class="fas fa-key"></i>
+                    Configura API
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Scanner Section -->
+            <section class="scanner-section">
+                <div class="scanner-tabs">
+                    <button class="tab-btn active" data-tab="url">
+                        <i class="fas fa-link"></i>
+                        Scansiona URL
+                    </button>
+                    <button class="tab-btn" data-tab="file">
+                        <i class="fas fa-file"></i>
+                        Scansiona File
+                    </button>
+                </div>
+
+                <!-- URL Scanner -->
+                <div class="tab-content active" id="url-tab">
+                    <div class="input-section">
+                        <div class="url-input-container">
+                            <input type="url" id="urlInput" placeholder="Inserisci URL da analizzare..." />
+                            <button id="scanUrlBtn" class="scan-btn">
+                                <i class="fas fa-search"></i>
+                                Scansiona
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- File Scanner -->
+                <div class="tab-content" id="file-tab">
+                    <div class="file-drop-zone" id="fileDropZone">
+                        <div class="drop-zone-content">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <h3>Trascina qui il file o clicca per selezionare</h3>
+                            <p>Supportati: tutti i tipi di file (max 650MB)</p>
+                            <input type="file" id="fileInput" hidden />
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Loading Section -->
+            <section class="loading-section hidden" id="loadingSection">
+                <div class="scanner-animation">
+                    <div class="scanner-line"></div>
+                    <div class="scanning-text">
+                        <i class="fas fa-shield-virus spin"></i>
+                        <span id="loadingText">Scansione in corso...</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section hidden" id="resultsSection">
+                <div class="results-header">
+                    <h2>Risultati Scansione</h2>
+                    <button id="newScanBtn" class="secondary-btn">
+                        <i class="fas fa-plus"></i>
+                        Nuova Scansione
+                    </button>
+                </div>
+                <div class="results-content" id="resultsContent">
+                    <!-- Risultati dinamici qui -->
+                </div>
+            </section>
+
+            <!-- History Section -->
+            <section class="history-section">
+                <h2>Cronologia Scansioni</h2>
+                <div class="history-controls">
+                    <input type="search" id="historySearch" placeholder="Cerca nelle scansioni..." />
+                    <select id="historyFilter">
+                        <option value="all">Tutti</option>
+                        <option value="clean">Puliti</option>
+                        <option value="infected">Infetti</option>
+                        <option value="suspicious">Sospetti</option>
+                    </select>
+                </div>
+                <div class="history-list" id="historyList">
+                    <div class="no-history">
+                        <i class="fas fa-history"></i>
+                        <p>Nessuna scansione effettuata</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- API Configuration Modal -->
+        <div class="modal-overlay hidden" id="apiModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>
+                        <i class="fas fa-key"></i>
+                        Configurazione API VirusTotal
+                    </h3>
+                    <button class="modal-close" id="closeApiModal">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="api-info">
+                        <div class="info-card">
+                            <i class="fas fa-info-circle"></i>
+                            <div>
+                                <h4>Come ottenere la tua API key:</h4>
+                                <ol>
+                                    <li>Vai su <a href="https://www.virustotal.com/" target="_blank">VirusTotal.com</a></li>
+                                    <li>Crea un account gratuito o accedi</li>
+                                    <li>Vai nella sezione "API Key" del tuo profilo</li>
+                                    <li>Copia la tua API key personale</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="apiKeyInput">API Key VirusTotal:</label>
+                        <div class="input-with-icon">
+                            <input type="password" id="apiKeyInput" placeholder="Inserisci la tua API key..." />
+                            <button type="button" id="toggleApiKey" class="toggle-password">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                        <small class="form-help">La tua API key viene salvata solo localmente nel tuo browser</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="rememberApiKey" checked>
+                            <span class="checkmark"></span>
+                            Ricorda API key per le prossime sessioni
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="testApiBtn" class="secondary-btn">
+                        <i class="fas fa-vial"></i>
+                        Testa Connessione
+                    </button>
+                    <button id="saveApiBtn" class="primary-btn">
+                        <i class="fas fa-save"></i>
+                        Salva e Connetti
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div class="toast-container" id="toastContainer"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
