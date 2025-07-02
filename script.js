@@ -56,71 +56,17 @@ class VirusTotalScanner {
         this.apiKeyInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.saveApiKey(); });
     }
 
-    async handleFileSelect(file) {
-        if (!file) return;
-        
-        if (file.size > 32 * 1024 * 1024) { 
-            this.showToast('File troppo grande (max 32MB per upload diretto)', 'error');
-            return;
-        }
-
-        if (!this.apiKey) {
-            this.showToast('Configura la tua API key prima di scansionare', 'error');
-            this.showApiModal();
-            return;
-        }
-
-        this.showLoading(`Caricamento file: ${file.name}...`);
-
-        try {
-            const analysisId = await this.submitFileScan(file);
-            this.loadingText.textContent = 'Attendo risultati scansione...';
-            
-            const result = await this.pollForResults(analysisId, file.name, 'file');
-            this.showResults(result);
-            this.addToHistory(result);
-        } catch (error) {
-            console.error('Errore nella scansione del file:', error);
-            this.showToast('Errore nella scansione: ' + error.message, 'error');
-            this.hideLoading();
-        }
-    }
-
-    async submitFileScan(file) {
-        console.log('Invio file per scansione tramite proxy:', file.name);
-
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('apiKey', this.apiKey);
-
-        const response = await fetch('/.netlify/functions/virustotal-proxy', {
-            method: 'POST',
-            body: formData
-        });
-
-        const data = await response.json();
-        console.log('Risposta sottomissione file:', data);
-        
-        if (response.ok && data.data && data.data.id) {
-            return data.data.id;
-        } else {
-            throw new Error(data.error?.message || 'Errore nella sottomissione file');
-        }
-    }
-
     async apiProxy(endpoint, options = {}, apiKey) {
         const body = {
             apiKey: apiKey,
             endpoint: endpoint,
             options: options
         };
-
         const response = await fetch('/.netlify/functions/virustotal-proxy', {
             method: 'POST',
             body: JSON.stringify(body),
             headers: { 'Content-Type': 'application/json' }
         });
-
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error?.message || `Errore del server proxy (status: ${response.status})`);
@@ -136,7 +82,6 @@ class VirusTotalScanner {
             this.showToast('API key caricata dal browser', 'success');
         } else {
             this.updateApiStatus(false);
-            this.showToast('Configura la tua API key per iniziare', 'info');
         }
     }
 
@@ -232,7 +177,28 @@ class VirusTotalScanner {
     }
 
     async handleFileSelect(file) {
-        this.showToast('La scansione dei file non è ancora supportata.', 'warning');
+        if (!file) return;
+        if (file.size > 32 * 1024 * 1024) { 
+            this.showToast('File troppo grande (max 32MB per questo metodo)', 'error');
+            return;
+        }
+        if (!this.apiKey) {
+            this.showToast('Configura la tua API key prima di scansionare', 'error');
+            this.showApiModal();
+            return;
+        }
+        this.showLoading(`Caricamento file: ${file.name}...`);
+        try {
+            const analysisId = await this.submitFileScan(file);
+            this.loadingText.textContent = 'Attendo risultati scansione...';
+            const result = await this.pollForResults(analysisId, file.name, 'file');
+            this.showResults(result);
+            this.addToHistory(result);
+        } catch (error) {
+            console.error('Errore nella scansione del file:', error);
+            this.showToast('Errore nella scansione del file: ' + error.message, 'error');
+            this.hideLoading();
+        }
     }
     
     handleDragOver(e) { e.preventDefault(); this.fileDropZone.classList.add('drag-over'); }
@@ -251,11 +217,27 @@ class VirusTotalScanner {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: bodyContent
         }, this.apiKey);
-        
         if (data.data && data.data.id) {
             return data.data.id;
         } else {
             throw new Error(data.error?.message || 'Errore nella sottomissione URL');
+        }
+    }
+    
+    async submitFileScan(file) {
+        console.log('Invio file per scansione tramite proxy:', file.name);
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('apiKey', this.apiKey);
+        const response = await fetch('/.netlify/functions/virustotal-proxy', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (response.ok && data.data && data.data.id) {
+            return data.data.id;
+        } else {
+            throw new Error(data.error?.message || 'Errore nella sottomissione file');
         }
     }
 
@@ -265,10 +247,15 @@ class VirusTotalScanner {
             try {
                 console.log(`Tentativo ${attempt + 1} di recupero risultati per:`, analysisId);
                 const data = await this.apiProxy(`analyses/${analysisId}`, { method: 'GET' }, this.apiKey);
-                if (data.data && data.data.attributes.status === 'completed') {
-                    return this.formatScanResult(data.data, originalResource, type);
+                const attributes = data.data.attributes;
+                if (attributes.status === 'completed') {
+                    // Per gli URL, il permalink è nell'oggetto 'url_info'
+                    if (type === 'url' && data.data.meta && data.data.meta.url_info) {
+                        data.permalinkId = data.data.meta.url_info.id;
+                    }
+                    return this.formatScanResult(data, originalResource, type);
                 }
-                this.loadingText.textContent = `Scansione in corso... (tentativo ${attempt + 1}/${maxAttempts})`;
+                this.loadingText.textContent = `Scansione in corso... (${attributes.status}) (tentativo ${attempt + 1}/${maxAttempts})`;
             } catch (error) {
                 console.error(`Errore nel tentativo ${attempt + 1}:`, error);
                 if (attempt === maxAttempts - 1) throw error;
@@ -277,20 +264,127 @@ class VirusTotalScanner {
         throw new Error('Timeout: la scansione sta richiedendo troppo tempo');
     }
 
-    formatScanResult(data, resource, type) { const attributes = data.attributes; const stats = attributes.stats || {}; const positives = (stats.malicious || 0) + (stats.suspicious || 0); const total = Object.keys(attributes.results || {}).length; let status = 'clean'; if (positives > 0) { status = (stats.malicious || 0) > 0 ? 'infected' : 'suspicious'; } return { id: Date.now().toString(), resource, type, scanDate: attributes.date ? new Date(attributes.date * 1000).toISOString() : new Date().toISOString(), positives, total, permalink: `https://www.virustotal.com/gui/${type === 'url' ? 'url' : 'file'}/${data.meta.url_info.id}`, status, stats }; }
-    showResults(result) { this.hideLoading(); this.resultsSection.classList.remove('hidden'); const statusClass = result.status; const statusText = { clean: 'Pulito', infected: 'Infetto', suspicious: 'Sospetto' }[result.status]; const detectionRate = result.total > 0 ? ((result.positives / result.total) * 100).toFixed(1) : 0; this.resultsContent.innerHTML = `<div class="result-card"><div class="result-header"><div class="result-info"><h3>${this.escapeHtml(result.resource)}</h3><p>Scansionato il ${new Date(result.scanDate).toLocaleString('it-IT')}</p></div><div class="status-badge ${statusClass}">${statusText}</div></div><div class="result-stats"><div class="stat-item"><div class="stat-value ${result.positives > 0 ? 'positive' : 'negative'}">${result.positives}</div><div class="stat-label">Rilevamenti</div></div><div class="stat-item"><div class="stat-value">${result.total}</div><div class="stat-label">Motori totali</div></div><div class="stat-item"><div class="stat-value ${result.positives > 0 ? 'positive' : 'negative'}">${detectionRate}%</div><div class="stat-label">Tasso rilevamento</div></div></div>${result.stats ? `<div class="detailed-stats"><h4>Dettagli Scansione:</h4><div class="stats-grid"><div class="stat-detail malicious"><span class="stat-number">${result.stats.malicious || 0}</span><span class="stat-name">Malevoli</span></div><div class="stat-detail suspicious"><span class="stat-number">${result.stats.suspicious || 0}</span><span class="stat-name">Sospetti</span></div><div class="stat-detail clean"><span class="stat-number">${result.stats.harmless || 0}</span><span class="stat-name">Puliti</span></div><div class="stat-detail undetected"><span class="stat-number">${result.stats.undetected || 0}</span><span class="stat-name">Non rilevati</span></div></div></div>` : ''}${result.permalink ? `<div style="margin-top: 20px;"><a href="${result.permalink}" target="_blank" class="secondary-btn"><i class="fas fa-external-link-alt"></i> Vedi report completo su VirusTotal</a></div>` : ''}</div>`; this.resultsContent.scrollIntoView({ behavior: 'smooth' }); }
-    addToHistory(result) { this.scanHistory.unshift(result); if (this.scanHistory.length > 50) { this.scanHistory = this.scanHistory.slice(0, 50); } localStorage.setItem('scanHistory', JSON.stringify(this.scanHistory)); this.renderHistory(); }
-    renderHistory() { if (this.scanHistory.length === 0) { this.historyList.innerHTML = `<div class="no-history"><i class="fas fa-history"></i><p>Nessuna scansione effettuata</p></div>`; return; } const filteredHistory = this.getFilteredHistory(); if (filteredHistory.length === 0) { this.historyList.innerHTML = `<div class="no-history"><i class="fas fa-search"></i><p>Nessun risultato trovato</p></div>`; return; } this.historyList.innerHTML = filteredHistory.map(item => `<div class="history-item" onclick="scanner.showHistoryDetails('${item.id}')"><div class="history-info"><h4>${this.escapeHtml(item.resource)}</h4><p>${new Date(item.scanDate).toLocaleString('it-IT')} • ${item.positives}/${item.total} rilevamenti</p></div><div class="status-badge ${item.status}">${{clean: 'Pulito', infected: 'Infetto', suspicious: 'Sospetto'}[item.status]}</div></div>`).join(''); }
-    getFilteredHistory() { let filtered = [...this.scanHistory]; const statusFilter = this.historyFilter.value; if (statusFilter !== 'all') { filtered = filtered.filter(item => item.status === statusFilter); } const searchTerm = this.historySearch.value.toLowerCase(); if (searchTerm) { filtered = filtered.filter(item => item.resource.toLowerCase().includes(searchTerm)); } return filtered; }
-    filterHistory() { this.renderHistory(); }
-    showHistoryDetails(id) { const item = this.scanHistory.find(scan => scan.id === id); if (item) { this.showResults(item); } }
-    showLoading(message) { this.loadingText.textContent = message; this.loadingSection.classList.remove('hidden'); this.resultsSection.classList.add('hidden'); }
-    hideLoading() { this.loadingSection.classList.add('hidden'); }
-    resetScanner() { this.urlInput.value = ''; this.fileInput.value = ''; this.resultsSection.classList.add('hidden'); this.loadingSection.classList.add('hidden'); }
-    showToast(message, type = 'info') { const toast = document.createElement('div'); toast.className = `toast ${type}`; const icon = { success: 'fas fa-check-circle', error: 'fas fa-exclamation-circle', warning: 'fas fa-exclamation-triangle', info: 'fas fa-info-circle' }[type]; toast.innerHTML = `<i class="${icon}"></i><span>${message}</span>`; this.toastContainer.appendChild(toast); setTimeout(() => { toast.remove(); }, 5000); }
-    isValidUrl(string) { try { new URL(string); return true; } catch (_) { return false; } }
-    escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
-    sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+    formatScanResult(data, resource, type) {
+        const attributes = data.data.attributes;
+        const stats = attributes.stats || {};
+        const positives = (stats.malicious || 0) + (stats.suspicious || 0);
+        const total = Object.values(stats).reduce((a, b) => a + b, 0);
+        let status = 'clean';
+        if (positives > 0) {
+            status = (stats.malicious || 0) > 0 ? 'infected' : 'suspicious';
+        }
+        // Crea il permalink in modo robusto
+        let permalink = '';
+        if (type === 'url' && data.permalinkId) {
+             permalink = `https://www.virustotal.com/gui/url/${data.permalinkId}`;
+        } else if (type === 'file') {
+             const fileHash = data.meta?.file_info?.sha256;
+             if(fileHash) permalink = `https://www.virustotal.com/gui/file/${fileHash}`;
+        }
+
+        return { id: Date.now().toString(), resource, type, scanDate: new Date(attributes.date * 1000).toISOString(), positives, total, permalink, status, stats };
+    }
+    
+    showResults(result) {
+        this.hideLoading();
+        this.resultsSection.classList.remove('hidden');
+        const statusClass = result.status;
+        const statusText = { clean: 'Pulito', infected: 'Infetto', suspicious: 'Sospetto' }[result.status];
+        const detectionRate = result.total > 0 ? ((result.positives / result.total) * 100).toFixed(1) : 0;
+        this.resultsContent.innerHTML = `<div class="result-card"><div class="result-header"><div class="result-info"><h3>${this.escapeHtml(result.resource)}</h3><p>Scansionato il ${new Date(result.scanDate).toLocaleString('it-IT')}</p></div><div class="status-badge ${statusClass}">${statusText}</div></div><div class="result-stats"><div class="stat-item"><div class="stat-value ${result.positives > 0 ? 'positive' : 'negative'}">${result.positives}</div><div class="stat-label">Rilevamenti</div></div><div class="stat-item"><div class="stat-value">${result.total}</div><div class="stat-label">Motori totali</div></div><div class="stat-item"><div class="stat-value ${result.positives > 0 ? 'positive' : 'negative'}">${detectionRate}%</div><div class="stat-label">Tasso rilevamento</div></div></div>${result.stats ? `<div class="detailed-stats"><h4>Dettagli Scansione:</h4><div class="stats-grid"><div class="stat-detail malicious"><span class="stat-number">${result.stats.malicious || 0}</span><span class="stat-name">Malevoli</span></div><div class="stat-detail suspicious"><span class="stat-number">${result.stats.suspicious || 0}</span><span class="stat-name">Sospetti</span></div><div class="stat-detail clean"><span class="stat-number">${result.stats.harmless || 0}</span><span class="stat-name">Puliti</span></div><div class="stat-detail undetected"><span class="stat-number">${result.stats.undetected || 0}</span><span class="stat-name">Non rilevati</span></div></div></div>` : ''}${result.permalink ? `<div style="margin-top: 20px;"><a href="${result.permalink}" target="_blank" class="secondary-btn"><i class="fas fa-external-link-alt"></i> Vedi report completo su VirusTotal</a></div>` : ''}</div>`;
+        this.resultsContent.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    addToHistory(result) {
+        this.scanHistory.unshift(result);
+        if (this.scanHistory.length > 50) {
+            this.scanHistory = this.scanHistory.slice(0, 50);
+        }
+        localStorage.setItem('scanHistory', JSON.stringify(this.scanHistory));
+        this.renderHistory();
+    }
+    
+    renderHistory() {
+        if (this.scanHistory.length === 0) {
+            this.historyList.innerHTML = `<div class="no-history"><i class="fas fa-history"></i><p>Nessuna scansione effettuata</p></div>`;
+            return;
+        }
+        const filteredHistory = this.getFilteredHistory();
+        if (filteredHistory.length === 0) {
+            this.historyList.innerHTML = `<div class="no-history"><i class="fas fa-search"></i><p>Nessun risultato trovato</p></div>`;
+            return;
+        }
+        this.historyList.innerHTML = filteredHistory.map(item => `<div class="history-item" onclick="scanner.showHistoryDetails('${item.id}')"><div class="history-info"><h4>${this.escapeHtml(item.resource)}</h4><p>${new Date(item.scanDate).toLocaleString('it-IT')} • ${item.positives}/${item.total} rilevamenti</p></div><div class="status-badge ${item.status}">${{clean: 'Pulito', infected: 'Infetto', suspicious: 'Sospetto'}[item.status]}</div></div>`).join('');
+    }
+    
+    getFilteredHistory() {
+        let filtered = [...this.scanHistory];
+        const statusFilter = this.historyFilter.value;
+        if (statusFilter !== 'all') {
+            filtered = filtered.filter(item => item.status === statusFilter);
+        }
+        const searchTerm = this.historySearch.value.toLowerCase();
+        if (searchTerm) {
+            filtered = filtered.filter(item => item.resource.toLowerCase().includes(searchTerm));
+        }
+        return filtered;
+    }
+    
+    filterHistory() {
+        this.renderHistory();
+    }
+    
+    showHistoryDetails(id) {
+        const item = this.scanHistory.find(scan => scan.id === id);
+        if (item) {
+            this.showResults(item);
+        }
+    }
+    
+    showLoading(message) {
+        this.loadingText.textContent = message;
+        this.loadingSection.classList.remove('hidden');
+        this.resultsSection.classList.add('hidden');
+    }
+    
+    hideLoading() {
+        this.loadingSection.classList.add('hidden');
+    }
+    
+    resetScanner() {
+        this.urlInput.value = '';
+        this.fileInput.value = '';
+        this.resultsSection.classList.add('hidden');
+        this.loadingSection.classList.add('hidden');
+    }
+    
+    showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        const icon = { success: 'fas fa-check-circle', error: 'fas fa-exclamation-circle', warning: 'fas fa-exclamation-triangle', info: 'fas fa-info-circle' }[type];
+        toast.innerHTML = `<i class="${icon}"></i><span>${message}</span>`;
+        this.toastContainer.appendChild(toast);
+        setTimeout(() => { toast.remove(); }, 5000);
+    }
+    
+    isValidUrl(string) {
+        try {
+            new URL(string);
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
