@@ -10,22 +10,25 @@ exports.handler = async function(event) {
 
         if (contentType && contentType.startsWith('multipart/form-data')) {
             const form = await multipart.parse(event);
-            const file = form.files[0];
             const apiKey = form.apiKey;
 
-            if (!file || !apiKey) {
-                return { statusCode: 400, body: JSON.stringify({ error: 'File o API key mancanti' }) };
+            // ========= LA CORREZIONE È QUI =========
+            // Aggiungiamo un controllo per assicurarci che il file sia stato ricevuto
+            if (!apiKey || !form.files || form.files.length === 0) {
+                console.error("Errore: API key o file mancanti nel form ricevuto.", { apiKey: !!apiKey, files: form.files });
+                return { statusCode: 400, body: JSON.stringify({ error: 'Dati del form (file o API key) incompleti o corrotti.' }) };
             }
 
+            const file = form.files[0];
+            // =======================================
+
             const uploadUrl = `${baseUrl}/files`;
-            
+
             const formData = new FormData();
             formData.append('file', file.content, file.filename);
 
             const response = await fetch(uploadUrl, {
                 method: 'POST',
-                // === LA MODIFICA CHIAVE È QUI ===
-                // Uniamo gli header necessari per il form con la nostra API key
                 headers: {
                     ...formData.getHeaders(),
                     'x-apikey': apiKey
@@ -37,7 +40,7 @@ exports.handler = async function(event) {
             return { statusCode: response.status, body: JSON.stringify(data) };
 
         } else {
-            // --- GESTIONE URL (rimane invariata) ---
+            // --- GESTIONE URL (invariata e funzionante) ---
             if (event.httpMethod !== 'POST') {
                 return { statusCode: 405, body: 'Method Not Allowed' };
             }
